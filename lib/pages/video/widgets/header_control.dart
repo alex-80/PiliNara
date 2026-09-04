@@ -654,17 +654,18 @@ class HeaderControlState extends State<HeaderControl>
                             return ActionRowLineItem(
                               iconData: Icons.headphones,
                               onTap: () {
-                                plPlayerController.onlyPlayAudio.value =
-                                    !onlyPlayAudio;
+                                plPlayerController.setOnlyPlayAudio();
+                                final newOnlyPlayAudio =
+                                    plPlayerController.onlyPlayAudio.value;
                                 final player =
                                     plPlayerController.videoPlayerController!;
-                                if (onlyPlayAudio &&
+                                if (newOnlyPlayAudio &&
                                     player.state.tracks.video.length <= 2) {
                                   videoDetailCtr.playerInit();
                                 } else {
                                   player.setProperty(
                                     'file-local-options/vid',
-                                    onlyPlayAudio ? 'auto' : 'no',
+                                    newOnlyPlayAudio ? 'auto' : 'no',
                                   );
                                 }
                               },

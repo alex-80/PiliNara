@@ -46,6 +46,7 @@ class PlDanmakuController {
 
   final Map<int, List<DanmakuElem>> _dmSegMap = HashMap();
   final Map<int, List<DanmakuElem>> _rawDmSegMap = HashMap();
+  final Set<int> _loadedSeg = HashSet();
   final Map<int, int> _prefetchRetryAtMs = HashMap();
   final Map<int, int> _prefetchFailureCount = HashMap();
   final Set<int> _missingSeg = HashSet();
@@ -56,6 +57,7 @@ class PlDanmakuController {
   final ListQueue<_QueuedDanmakuRequest> _downloadQueue = ListQueue();
   final Set<int> _mergingSeg = HashSet();
   int _activeDownloads = 0;
+  int _lastEvictedSegment = -1;
   bool _disposed = false;
 
   static const int segmentLength = 60 * 6 * 1000;
@@ -97,6 +99,7 @@ class PlDanmakuController {
     _mergeWorker.dispose();
     _dmSegMap.clear();
     _rawDmSegMap.clear();
+    _loadedSeg.clear();
     _prefetchRetryAtMs.clear();
     _prefetchFailureCount.clear();
     _missingSeg.clear();
@@ -174,6 +177,7 @@ class PlDanmakuController {
         _plPlayerController.dmState.add(_cid);
       }
       await handleDanmaku(segmentIndex, response.elems);
+      _loadedSeg.add(segmentIndex);
     } else {
       if (kDebugMode) {
         debugPrint(
@@ -353,10 +357,11 @@ class PlDanmakuController {
   }
 
   List<DanmakuElem>? getCurrentDanmaku(int progress) {
+    final segmentIndex = calcSegment(progress);
+    _evictOldSegments(segmentIndex);
     if (_isFileSource) {
       initFileDmIfNeeded();
     } else {
-      final int segmentIndex = calcSegment(progress);
       if (_mergeDanmaku &&
           (!_mergedSeg.contains(segmentIndex) ||
               _shouldPrefetchNextSegment(progress, segmentIndex))) {
@@ -366,21 +371,55 @@ class PlDanmakuController {
         _scheduleSegment(segmentIndex + 1, isPrefetch: true);
         _scheduleSegment(segmentIndex + 2, isPrefetch: true);
       }
-      if (!_requestedSeg.contains(segmentIndex)) {
+      if (!_loadedSeg.contains(segmentIndex)) {
         if (kDebugMode) {
-          debugPrint(
-            '[PlDanmakuController] current miss instance=${identityHashCode(this)} '
-            'cid=$_cid progress=$progress segment=$segmentIndex',
-          );
+          if (!_requestedSeg.contains(segmentIndex)) {
+            debugPrint(
+              '[PlDanmakuController] current miss instance=${identityHashCode(this)} '
+              'cid=$_cid progress=$progress segment=$segmentIndex',
+            );
+          }
         }
-        _scheduleSegment(segmentIndex);
-        if (!_mergeDanmaku) {
-          _scheduleSegment(segmentIndex + 1, isPrefetch: true);
+        if (!_requestedSeg.contains(segmentIndex)) {
+          _scheduleSegment(segmentIndex);
+          if (!_mergeDanmaku) {
+            _scheduleSegment(segmentIndex + 1, isPrefetch: true);
+          }
         }
         return null;
       }
     }
     return _dmSegMap[progress ~/ 100];
+  }
+
+  void _evictOldSegments(int currentSegment) {
+    if (_isFileSource ||
+        currentSegment <= 1 ||
+        currentSegment == _lastEvictedSegment) {
+      return;
+    }
+    _lastEvictedSegment = currentSegment;
+
+    final firstRetainedSegment = currentSegment - 1;
+    final firstRetainedPosition = firstRetainedSegment * segmentLength ~/ 100;
+    _dmSegMap.removeWhere((position, _) => position < firstRetainedPosition);
+    _rawDmSegMap.removeWhere(
+      (segment, _) => segment < firstRetainedSegment,
+    );
+    _loadedSeg.removeWhere((segment) => segment < firstRetainedSegment);
+    _requestedSeg.removeWhere((segment) => segment < firstRetainedSegment);
+    _queuedSeg.removeWhere((segment) => segment < firstRetainedSegment);
+    _downloadQueue.removeWhere(
+      (request) => request.segmentIndex < firstRetainedSegment,
+    );
+    _mergedSeg.removeWhere((segment) => segment < firstRetainedSegment);
+    _missingSeg.removeWhere((segment) => segment < firstRetainedSegment);
+    _prefetchRetryAtMs.removeWhere(
+      (segment, _) => segment < firstRetainedSegment,
+    );
+    _prefetchFailureCount.removeWhere(
+      (segment, _) => segment < firstRetainedSegment,
+    );
   }
 
   bool _shouldPrefetchNextSegment(int progress, int segmentIndex) {

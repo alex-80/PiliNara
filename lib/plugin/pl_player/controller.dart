@@ -571,7 +571,22 @@ class PlPlayerController with BlockConfigMixin {
 
   Box video = GStorage.video;
 
-  bool visible = true;
+  bool _visible = true;
+
+  bool get visible => _visible;
+
+  set visible(bool value) {
+    if (_visible == value) return;
+    _visible = value;
+    _updateWakelock();
+  }
+
+  bool get _shouldKeepWakelock =>
+      playerStatus.isPlaying && visible && !onlyPlayAudio.value && !isPipMode;
+
+  void _updateWakelock() {
+    WakelockPlus.toggle(enable: _shouldKeepWakelock);
+  }
 
   DeviceOrientation? _orientation;
   late final checkIsAutoRotate = Platform.isAndroid && mode != .gravity;
@@ -924,9 +939,9 @@ class PlPlayerController with BlockConfigMixin {
     final opt = {
       'video-sync': Pref.videoSync,
       if (Platform.isAndroid) 'ao': Pref.audioOutput,
-      'volume': (PlatformUtils.isMobile
-              ? (Pref.enableAppVolume ? volume.value * 100 : Pref.playerVolume)
-              : volume.value * 100)
+        'volume': (PlatformUtils.isMobile
+            ? (Pref.enableAppVolume ? volume.value * 100 : Pref.playerVolume)
+            : volume.value * 100)
           .toString(),
       'volume-max': kMaxVolume.toString(),
     };
@@ -1111,7 +1126,6 @@ class PlPlayerController with BlockConfigMixin {
     _subscriptions = [
       /// playing
       stream.playing.listen((bool playing) {
-        WakelockPlus.toggle(enable: playing);
         if (playing) {
           if (_isAutoEnterPip) {
             if (_isCurrVideoPage || _isInInAppPip) {
@@ -1125,6 +1139,7 @@ class PlPlayerController with BlockConfigMixin {
           _disableAutoEnterPip();
           playerStatus.value = .paused;
         }
+        _updateWakelock();
 
         videoPlayerServiceHandler?.onStatusChange(
           playerStatus.value,
@@ -2050,9 +2065,7 @@ class PlPlayerController with BlockConfigMixin {
     _removeListeners();
     _positionListeners.clear();
     _statusListeners.clear();
-    if (playerStatus.isPlaying) {
-      WakelockPlus.disable();
-    }
+    WakelockPlus.disable();
     if (kDebugMode) {
       debugPrint('dispose player');
     }
@@ -2084,6 +2097,7 @@ class PlPlayerController with BlockConfigMixin {
 
   void setOnlyPlayAudio() {
     onlyPlayAudio.toggle();
+    _updateWakelock();
     videoPlayerController?.setVideoTrack(onlyPlayAudio.value ? .no() : .auto());
   }
 

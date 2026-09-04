@@ -42,7 +42,9 @@ Future<VideoPlayerServiceHandler> initAudioService() {
 
 class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
   static final List<MediaItem> _item = [];
+  static const _positionUpdateInterval = Duration(milliseconds: 500);
   bool enableBackgroundPlay = Pref.enableBackgroundPlay;
+  DateTime? _lastPositionUpdate;
 
   Future<void>? Function()? onPlay;
   Future<void>? Function()? onPause;
@@ -421,6 +423,13 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
         !PlPlayerController.instanceExists()) {
       return;
     }
+
+    final now = DateTime.now();
+    final last = _lastPositionUpdate;
+    if (last != null && now.difference(last) < _positionUpdateInterval) {
+      return;
+    }
+    _lastPositionUpdate = now;
 
     playbackState.add(
       playbackState.value.copyWith(
